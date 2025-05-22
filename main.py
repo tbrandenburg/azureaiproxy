@@ -60,7 +60,6 @@ async def proxy_chat(request: Request):
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
-            "User-Agent": "Zed/0.178.5",
             "api-key": AZURE_API_KEY,
         }
 
