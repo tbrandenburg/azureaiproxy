@@ -62,7 +62,7 @@ async def proxy_chat(request: Request):
             "api-key": AZURE_API_KEY
         }
 
-        async with httpx.AsyncClient(timeout=60, http2=True) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             if stream:
                 async with client.stream(
                     "POST",
