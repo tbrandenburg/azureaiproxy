@@ -1,5 +1,4 @@
-fastapi
-uvicorn
 gradio
 dotenv
 httpx
+aiohttp
