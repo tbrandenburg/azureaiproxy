@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 import uvicorn
+import json
 
 # === Logging Configuration ===
 
@@ -61,26 +62,41 @@ async def proxy_chat(request: Request):
             "api-key": AZURE_API_KEY
         }
 
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with httpx.AsyncClient(timeout=60, http2=True) as client:
             if stream:
-                azure_response = await client.stream(
+                async with client.stream(
                     "POST",
                     azure_url,
                     params=params,
-                    headers=headers,
-                    json=body,
-                )
+                    headers=headers
+                ) as azure_response:
 
-                async def stream_response():
-                    try:
-                        async for line in azure_response.aiter_lines():
-                            if line.strip():
-                                logger.debug(f"Stream chunk: {line.strip()}")
-                                yield f"data: {line.strip()}\n\n"
-                    finally:
-                        await azure_response.aclose()
+                    async def stream_response():
+                        retries = 3
+                        for attempt in range(retries):
+                            try:
+                                async for line in azure_response.aiter_lines():
+                                    if line.strip():
+                                        if line.strip() == "[DONE]":
+                                            logger.debug("Stream completed with [DONE] marker.")
+                                            return
+                                        if line.startswith("data:"):
+                                            try:
+                                                data = json.loads(line[5:].strip())
+                                                logger.debug(f"Stream chunk: {data}")
+                                                yield f"data: {json.dumps(data)}\n\n"
+                                            except json.JSONDecodeError:
+                                                logger.error(f"Failed to parse JSON: {line.strip()}")
+                                                yield f"data: [ERROR] Invalid JSON format.\n\n"
+                                break
+                            except httpx.StreamClosed:
+                                logger.error(f"Stream closed unexpectedly. Attempt {attempt + 1} of {retries}.")
+                                if attempt + 1 == retries:
+                                    yield "data: [ERROR] Stream closed unexpectedly after retries.\n\n"
+                                else:
+                                    continue
 
-                return StreamingResponse(stream_response(), media_type="text/event-stream")
+                    return StreamingResponse(stream_response(), media_type="text/event-stream")
             else:
                 azure_response = await client.post(
                     azure_url,
