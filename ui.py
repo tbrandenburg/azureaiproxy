@@ -13,8 +13,6 @@ def chat_with_azure(user_input):
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": user_input}
         ],
-        "temperature": 1,
-        "max_completion_tokens": 512,
         "stream": False  # could add streaming in a future version
     }
 
