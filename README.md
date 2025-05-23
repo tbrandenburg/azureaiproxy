@@ -2,8 +2,16 @@
 
 ## Usage
 
+### 1. Run the proxy
+
 ```sh
 python3 main.py
+```
+
+### 2. Run the UI
+
+```sh
+python3 ui.py
 ```
 
 ## Configuration in Zed
