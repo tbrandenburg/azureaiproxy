@@ -36,9 +36,9 @@ load_dotenv()
 
 # === Configuration ===
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "https://fillme.net")
-AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "o4-mini")
-AZURE_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
-AZURE_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-05-01")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "o4-mini")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-05-01")
 AZURE_TIMEOUT = int(os.getenv("AZURE_TIMEOUT", 60))  # seconds
 
 # === Routes ===
@@ -61,18 +61,36 @@ async def proxy_chat(request):
         logger.debug(f"Incoming request body:\n{json.dumps(body, indent=2)}")
         logger.info(f"{datetime.now()} - Forwarding request to Azure (stream={stream})")
 
-        azure_url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions"
-        params = {"api-version": AZURE_API_VERSION}
+        azure_url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions"
+        params = {"api-version": AZURE_OPENAI_API_VERSION}
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream" if stream else "application/json",
             "User-Agent": "AiohttpProxy/1.0",
-            "api-key": AZURE_API_KEY,
+            "api-key": AZURE_OPENAI_API_KEY,
         }
+        
+        logger.debug(f"Using URL: {azure_url}")
+
+        # === Proxy configuration ===
+        proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+        if proxy_url:
+            logger.info(f"Using proxy: {proxy_url}")
+        else:
+            logger.info("No proxy configured.")
 
         timeout = aiohttp.ClientTimeout(total=AZURE_TIMEOUT)
-        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            async with session.post(azure_url, params=params, json=body) as azure_response:
+        connector = aiohttp.TCPConnector(ssl=False)  # use ssl=True if proxy has valid cert
+
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout, connector=connector) as session:
+            request_kwargs = {
+                "params": params,
+                "json": body,
+            }
+            if proxy_url:
+                request_kwargs["proxy"] = proxy_url
+
+            async with session.post(azure_url, **request_kwargs) as azure_response:
                 if azure_response.status != 200:
                     error_detail = await azure_response.text()
                     logger.error(f"Azure returned non-200: {azure_response.status} - {error_detail}")
@@ -147,7 +165,6 @@ def create_app():
     app = web.Application()
     app.router.add_post("/v1/chat/completions", proxy_chat)
     app.router.add_get("/healthz", health_check)
-
     return app
 
 # === Graceful Shutdown ===
@@ -168,7 +185,6 @@ def main():
         else:
             logger.info("No proxy env vars set.")
 
-        # Wait indefinitely until shutdown
         while True:
             await asyncio.sleep(3600)
 
