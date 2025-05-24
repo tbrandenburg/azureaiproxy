@@ -25,12 +25,14 @@ azureaiproxy/
 
 ## Usage
 
-**Note:** You must configure the following environment variables in a `.env` file at the project root:
+**Note:** You must configure the following environment variables in a `.env` file at the project root. Example:
 
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_DEPLOYMENT`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_API_VERSION`
+```env
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=your-model-name
+AZURE_OPENAI_API_KEY=your-azure-openai-api-key
+AZURE_OPENAI_API_VERSION=2023-05-15
+```
 
 ### 1. Create and activate a virtual environment (recommended)
 
