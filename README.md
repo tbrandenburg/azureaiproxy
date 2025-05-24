@@ -5,7 +5,7 @@
 ### 1. Run the proxy
 
 ```sh
-python3 main.py
+python3 main.py [--port PORT]
 ```
 
 ### 2. Run the UI

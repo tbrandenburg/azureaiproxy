@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import signal
 import asyncio
+import argparse
 
 # === Logging Configuration ===
 log_dir = Path("logs")
@@ -170,14 +171,17 @@ def create_app():
 # === Graceful Shutdown ===
 
 def main():
+    parser = argparse.ArgumentParser(description="Proxy server")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind the server")
+    args = parser.parse_args()
     app = create_app()
     runner = web.AppRunner(app)
 
     async def start_server():
         await runner.setup()
-        site = web.TCPSite(runner, host="127.0.0.1", port=8000)
+        site = web.TCPSite(runner, host="127.0.0.1", port=args.port)
         await site.start()
-        logger.info("AIOHTTP proxy server started on http://127.0.0.1:8000")
+        logger.info(f"AIOHTTP proxy server started on http://127.0.0.1:{args.port}")
 
         # Log proxy environment
         if os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY"):
