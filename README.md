@@ -13,8 +13,6 @@ azureaiproxy/
 │   │   └── test_stream.py
 │   └── test_basic.py
 ├── logs/
-├── .env
-├── .gitignore
 ├── LICENSE
 ├── README.md
 ├── requirements.txt
@@ -23,13 +21,20 @@ azureaiproxy/
 
 ## Usage
 
-### 1. Run the proxy
+### 1. Create and activate a virtual environment (recommended)
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Run the proxy
 
 ```sh
 python3 -m azureaiproxy.cli [--port PORT]
 ```
 
-### 2. Run the UI
+### 3. Run the UI
 
 ```sh
 python3 -m azureaiproxy.ui
@@ -58,11 +63,11 @@ python3 -m azureaiproxy.ui
 
 ## Development
 
-- Install dependencies:  
+- Install dependencies:
   ```sh
   pip install -e .[dev]
   ```
-- Run tests:  
+- Run tests:
   ```sh
   python -m unittest discover tests
   ```
