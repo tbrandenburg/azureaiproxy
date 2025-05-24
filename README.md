@@ -1,5 +1,7 @@
 # azureaiproxy
 
+A lightweight proxy and UI for Azure OpenAI, designed to provide a local API-compatible interface and simple user interface for interacting with Azure-hosted language models. The core idea is to make Azure OpenAI endpoints compatible with the OpenAI API, enabling tools and clients built for OpenAI to work seamlessly with Azure's service.
+
 ## Project Structure
 
 ```
