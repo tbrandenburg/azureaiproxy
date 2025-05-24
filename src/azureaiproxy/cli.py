@@ -59,7 +59,7 @@ async def proxy_chat(request):
             return web.json_response({"error": "Invalid JSON in request body"}, status=400)
 
         stream = body.get("stream", False)
-        logger.debug(f"Incoming request body:\n{json.dumps(body, indent=2)}")
+        logger.debug(f"Incoming request headers:{str(dict(request.headers)).strip()}")
         logger.info(f"{datetime.now()} - Forwarding request to Azure (stream={stream})")
 
         azure_url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions"
@@ -70,15 +70,15 @@ async def proxy_chat(request):
             "User-Agent": "AiohttpProxy/1.0",
             "api-key": AZURE_OPENAI_API_KEY,
         }
-        
+
         logger.debug(f"Using URL: {azure_url}")
 
         # === Proxy configuration ===
         proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
         if proxy_url:
-            logger.info(f"Using proxy: {proxy_url}")
+            logger.debug(f"Using proxy: {proxy_url}")
         else:
-            logger.info("No proxy configured.")
+            logger.debug("No proxy configured.")
 
         timeout = aiohttp.ClientTimeout(total=AZURE_TIMEOUT)
         connector = aiohttp.TCPConnector(ssl=False)  # use ssl=True if proxy has valid cert
@@ -90,8 +90,11 @@ async def proxy_chat(request):
             }
             if proxy_url:
                 request_kwargs["proxy"] = proxy_url
+            logger.debug(f"Outgoing request: url={azure_url}, params={params}, headers={headers}, proxy={request_kwargs.get('proxy')}")
 
             async with session.post(azure_url, **request_kwargs) as azure_response:
+                logger.debug(f"Azure response status: {azure_response.status}")
+                logger.debug(f"Azure response headers: {dict(azure_response.headers)}")
                 if azure_response.status != 200:
                     error_detail = await azure_response.text()
                     logger.error(f"Azure returned non-200: {azure_response.status} - {error_detail}")
@@ -101,64 +104,68 @@ async def proxy_chat(request):
                     )
 
                 if not stream:
-                    logger.info("Non-streaming response mode.")
-                    json_response = await azure_response.json()
-                    return web.json_response(json_response, status=200)
+                    return await _handle_non_streaming(azure_response)
 
-                # Streaming mode
-                logger.info("Streaming response mode.")
-                web_response = web.StreamResponse(status=200, headers={
-                    "Content-Type": "text/event-stream",
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive"
-                })
-                await web_response.prepare(request)
-
-                buffer = ""
-                try:
-                    async for chunk in azure_response.content.iter_any():
-                        decoded_chunk = chunk.decode("utf-8")
-                        buffer += decoded_chunk
-
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-
-                            if line == "data: [DONE]":
-                                logger.debug("Azure stream completed.")
-                                await web_response.write(b"data: [DONE]\n\n")
-                                break
-
-                            if line.startswith("data:"):
-                                json_str = line[6:].strip()
-                                if json_str:
-                                    try:
-                                        payload = json.loads(json_str)
-                                        if "choices" in payload and not payload["choices"]:
-                                            continue
-                                        await web_response.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
-                                    except json.JSONDecodeError as e:
-                                        logger.error(f"Stream decode error: {e}")
-                                        await web_response.write(
-                                            f"data: [ERROR] Invalid JSON format: {json_str}\n\n".encode("utf-8"))
-                            elif line:
-                                await web_response.write(f"{line}\n\n".encode("utf-8"))
-
-                    if buffer:
-                        logger.debug(f"Remaining buffer: {buffer}")
-                        await web_response.write(f"{buffer}\n\n".encode("utf-8"))
-
-                    await web_response.write_eof()
-                    return web_response
-
-                except aiohttp.ClientError as e:
-                    logger.exception(f"Client error during streaming: {e}")
-                except Exception as e:
-                    logger.exception(f"Unexpected streaming error: {e}")
+                return await _handle_streaming(azure_response, request)
 
     except Exception as e:
         logger.exception("General proxy error occurred.")
         return web.json_response({"error": f"Internal proxy error: {e}"}, status=500)
+
+# === Azure response handlers ===
+async def _handle_non_streaming(azure_response):
+    text = await azure_response.text()
+    try:
+        json_response = json.loads(text)
+    except json.JSONDecodeError:
+        logger.error("Failed to parse Azure JSON response")
+        return web.Response(text=text, status=azure_response.status)
+    return web.json_response(json_response, status=azure_response.status)
+
+async def _handle_streaming(azure_response, request):
+    web_response = web.StreamResponse(status=200, headers={
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+    })
+    await web_response.prepare(request)
+    buffer = ""
+    try:
+        async for chunk in azure_response.content.iter_any():
+            decoded = chunk.decode("utf-8")
+            buffer += decoded
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.strip()
+                if line == "data: [DONE]":
+                    logger.debug("Azure stream completed.")
+                    await web_response.write(b"data: [DONE]\n\n")
+                    await web_response.write_eof()
+                    return web_response
+                if line.startswith("data:"):
+                    payload_str = line[len("data:"):].strip()
+                    if payload_str:
+                        try:
+                            payload = json.loads(payload_str)
+                            if "choices" in payload and not payload["choices"]:
+                                continue
+                            await web_response.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Stream decode error: {e}")
+                            await web_response.write(
+                                f"data: [ERROR] Invalid JSON format: {payload_str}\n\n".encode("utf-8"))
+                elif line:
+                    await web_response.write(f"{line}\n\n".encode("utf-8"))
+        if buffer:
+            await web_response.write(f"{buffer}\n\n".encode("utf-8"))
+        await web_response.write_eof()
+        return web_response
+    except aiohttp.ClientError as e:
+        logger.exception(f"Client error during streaming: {e}")
+        return web.json_response({"error": f"Streaming client error: {e}"}, status=500)
+    except Exception as e:
+        logger.exception(f"Unexpected streaming error: {e}")
+        return web.json_response({"error": f"Unexpected streaming error: {e}"}, status=500)
 
 # === App Initialization ===
 

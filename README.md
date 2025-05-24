@@ -1,17 +1,38 @@
 # azureaiproxy
 
+## Project Structure
+
+```
+azureaiproxy/
+├── src/azureaiproxy/
+│   ├── __init__.py
+│   ├── cli.py
+│   └── ui.py
+├── tests/
+│   ├── integration/
+│   │   └── test_stream.py
+│   └── test_basic.py
+├── logs/
+├── .env
+├── .gitignore
+├── LICENSE
+├── README.md
+├── requirements.txt
+└── pyproject.toml
+```
+
 ## Usage
 
 ### 1. Run the proxy
 
 ```sh
-python3 main.py [--port PORT]
+python3 -m azureaiproxy.cli [--port PORT]
 ```
 
 ### 2. Run the UI
 
 ```sh
-python3 ui.py
+python3 -m azureaiproxy.ui
 ```
 
 ## Configuration in Zed
@@ -34,3 +55,18 @@ python3 ui.py
   }
 }
 ```
+
+## Development
+
+- Install dependencies:  
+  ```sh
+  pip install -e .[dev]
+  ```
+- Run tests:  
+  ```sh
+  python -m unittest discover tests
+  ```
+
+## License
+
+This project is licensed under the Apache License 2.0.

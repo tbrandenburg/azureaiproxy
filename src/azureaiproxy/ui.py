@@ -32,5 +32,8 @@ iface = gr.Interface(
     description="Send a prompt to your local Azure OpenAI proxy.",
 )
 
-if __name__ == "__main__":
+def main():
     iface.launch()
+
+if __name__ == "__main__":
+    main()

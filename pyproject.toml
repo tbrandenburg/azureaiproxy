@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "azureaiproxy"
+version = "0.1.0"
+description = "A proxy and UI for Azure OpenAI API, with local chat interface."
+authors = [
+    { name="Tom Brandenburg", email="tom.brandenburg@gmail.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "aiohttp",
+    "python-dotenv",
+    "gradio",
+    "httpx",
+]
+
+[project.urls]
+Homepage = "https://github.com/tbrandenburg/azureaiproxy"
+Repository = "https://github.com/tbrandenburg/azureaiproxy"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.egg-info", "dist", "build"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["azureaiproxy"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    "*.egg-info",
+]
