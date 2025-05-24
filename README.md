@@ -44,8 +44,28 @@ source .venv/bin/activate
 ### 2. Run the proxy
 
 ```sh
-python3 -m azureaiproxy.cli [--port PORT]
+python3 -m azureaiproxy.cli [--port PORT] [--log-headers] [--log-bodies]
 ```
+
+**Command line options:**
+- `--port PORT`: Port to bind the server (default: 8000)
+- `--log-headers`: Enable logging of HTTP headers for requests and responses
+- `--log-bodies`: Enable logging of HTTP request and response bodies
+- `--help`: Show help message and exit
+
+**Examples:**
+```sh
+# Run with default settings (no detailed HTTP logging)
+python3 -m azureaiproxy.cli
+
+# Run on port 9000 with header logging enabled
+python3 -m azureaiproxy.cli --port 9000 --log-headers
+
+# Run with both header and body logging for debugging
+python3 -m azureaiproxy.cli --log-headers --log-bodies
+```
+
+**Note:** Header and body logging can generate verbose output and may expose sensitive information. Use these options primarily for debugging and development.
 
 ### 3. Run the UI
 

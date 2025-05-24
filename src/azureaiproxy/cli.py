@@ -42,6 +42,10 @@ AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-05-01")
 AZURE_TIMEOUT = int(os.getenv("AZURE_TIMEOUT", 60))  # seconds
 
+# === Logging preferences (set by argparse) ===
+LOG_HEADERS = False
+LOG_BODIES = False
+
 # === Routes ===
 
 async def health_check(request):
@@ -59,7 +63,10 @@ async def proxy_chat(request):
             return web.json_response({"error": "Invalid JSON in request body"}, status=400)
 
         stream = body.get("stream", False)
-        logger.debug(f"Incoming request headers:{str(dict(request.headers)).strip()}")
+        if LOG_HEADERS:
+            logger.debug(f"Incoming request headers: {str(dict(request.headers)).strip()}")
+        if LOG_BODIES:
+            logger.debug(f"Incoming request body: {json.dumps(body, indent=2)}")
         logger.info(f"{datetime.now()} - Forwarding request to Azure (stream={stream})")
 
         azure_url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}/chat/completions"
@@ -90,11 +97,16 @@ async def proxy_chat(request):
             }
             if proxy_url:
                 request_kwargs["proxy"] = proxy_url
-            logger.debug(f"Outgoing request: url={azure_url}, params={params}, headers={headers}, proxy={request_kwargs.get('proxy')}")
+            if LOG_HEADERS:
+                logger.debug(f"Outgoing request headers: {headers}")
+            if LOG_BODIES:
+                logger.debug(f"Outgoing request body: {json.dumps(body, indent=2)}")
+            logger.debug(f"Outgoing request: url={azure_url}, params={params}, proxy={request_kwargs.get('proxy')}")
 
             async with session.post(azure_url, **request_kwargs) as azure_response:
                 logger.debug(f"Azure response status: {azure_response.status}")
-                logger.debug(f"Azure response headers: {dict(azure_response.headers)}")
+                if LOG_HEADERS:
+                    logger.debug(f"Azure response headers: {dict(azure_response.headers)}")
                 if azure_response.status != 200:
                     error_detail = await azure_response.text()
                     logger.error(f"Azure returned non-200: {azure_response.status} - {error_detail}")
@@ -115,12 +127,55 @@ async def proxy_chat(request):
 # === Azure response handlers ===
 async def _handle_non_streaming(azure_response):
     text = await azure_response.text()
+    if LOG_BODIES:
+        logger.debug(f"Azure response body: {text}")
     try:
         json_response = json.loads(text)
     except json.JSONDecodeError:
         logger.error("Failed to parse Azure JSON response")
         return web.Response(text=text, status=azure_response.status)
     return web.json_response(json_response, status=azure_response.status)
+
+async def _process_stream_done_line(web_response):
+    """Handle the [DONE] line in streaming response"""
+    logger.debug("Azure stream completed.")
+    await web_response.write(b"data: [DONE]\n\n")
+    await web_response.write_eof()
+    return web_response
+
+async def _process_data_line(web_response, payload_str):
+    """Process a data line from the streaming response"""
+    if not payload_str:
+        return
+    
+    try:
+        payload = json.loads(payload_str)
+        if "choices" in payload and not payload["choices"]:
+            return
+        if LOG_BODIES:
+            logger.debug(f"Azure stream chunk: {json.dumps(payload, indent=2)}")
+        await web_response.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+    except json.JSONDecodeError as e:
+        logger.error(f"Stream decode error: {e}")
+        await web_response.write(
+            f"data: [ERROR] Invalid JSON format: {payload_str}\n\n".encode("utf-8"))
+
+async def _process_regular_line(web_response, line):
+    """Process a regular line from the streaming response"""
+    if LOG_BODIES:
+        logger.debug(f"Azure stream line: {line}")
+    await web_response.write(f"{line}\n\n".encode("utf-8"))
+
+async def _process_stream_line(web_response, line):
+    """Process a single line from the streaming response"""
+    if line == "data: [DONE]":
+        return await _process_stream_done_line(web_response)
+    elif line.startswith("data:"):
+        payload_str = line[len("data:"):].strip()
+        await _process_data_line(web_response, payload_str)
+    elif line:
+        await _process_regular_line(web_response, line)
+    return None
 
 async def _handle_streaming(azure_response, request):
     web_response = web.StreamResponse(status=200, headers={
@@ -137,25 +192,10 @@ async def _handle_streaming(azure_response, request):
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 line = line.strip()
-                if line == "data: [DONE]":
-                    logger.debug("Azure stream completed.")
-                    await web_response.write(b"data: [DONE]\n\n")
-                    await web_response.write_eof()
-                    return web_response
-                if line.startswith("data:"):
-                    payload_str = line[len("data:"):].strip()
-                    if payload_str:
-                        try:
-                            payload = json.loads(payload_str)
-                            if "choices" in payload and not payload["choices"]:
-                                continue
-                            await web_response.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Stream decode error: {e}")
-                            await web_response.write(
-                                f"data: [ERROR] Invalid JSON format: {payload_str}\n\n".encode("utf-8"))
-                elif line:
-                    await web_response.write(f"{line}\n\n".encode("utf-8"))
+                result = await _process_stream_line(web_response, line)
+                if result is not None:
+                    return result
+        
         if buffer:
             await web_response.write(f"{buffer}\n\n".encode("utf-8"))
         await web_response.write_eof()
@@ -180,7 +220,14 @@ def create_app():
 def main():
     parser = argparse.ArgumentParser(description="Proxy server")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind the server")
+    parser.add_argument("--log-headers", action="store_true", help="Enable logging of HTTP headers")
+    parser.add_argument("--log-bodies", action="store_true", help="Enable logging of HTTP request/response bodies")
     args = parser.parse_args()
+    
+    # Store logging preferences globally
+    global LOG_HEADERS, LOG_BODIES
+    LOG_HEADERS = args.log_headers
+    LOG_BODIES = args.log_bodies
     app = create_app()
     runner = web.AppRunner(app)
 
@@ -189,6 +236,17 @@ def main():
         site = web.TCPSite(runner, host="127.0.0.1", port=args.port)
         await site.start()
         logger.info(f"AIOHTTP proxy server started on http://127.0.0.1:{args.port}")
+        
+        # Log enabled logging options
+        logging_options = []
+        if LOG_HEADERS:
+            logging_options.append("headers")
+        if LOG_BODIES:
+            logging_options.append("bodies")
+        if logging_options:
+            logger.info(f"HTTP logging enabled for: {', '.join(logging_options)}")
+        else:
+            logger.info("HTTP logging disabled (use --log-headers and/or --log-bodies to enable)")
 
         # Log proxy environment
         if os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY"):
